@@ -165,6 +165,26 @@ class ResourceLoader(QThread):
                 elif key == 'doctors':
                     # unit_id, dep_id, date
                     data = self.client.get_schedule(args[0], args[1], args[2])
+                elif key == 'doctors_forecast':
+                    # unit_id, dep_id, start_date_str
+                    # 预测模式：扫描未来7天，汇总是该科室的出诊医生
+                    uid, did, start_date = args[0], args[1], args[2]
+                    all_docs = {}
+                    try:
+                        dt = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+                        for i in range(7):
+                            curr = (dt + datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+                            docs = self.client.get_schedule(uid, did, curr)
+                            if docs:
+                                for d in docs:
+                                    did_val = str(d.get('doctor_id'))
+                                    if did_val not in all_docs:
+                                        d['source_date'] = curr # 记录最早来源日期
+                                        all_docs[did_val] = d
+                            time.sleep(0.2) # 避免请求过快
+                    except Exception as e:
+                        print(f"Forecast error: {e}")
+                    data = list(all_docs.values())
                 
                 self.data_loaded.emit(key, data)
             except Exception as e:

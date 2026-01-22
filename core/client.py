@@ -25,10 +25,12 @@ class HealthClient:
             'Origin': 'https://www.91160.com'
         }
         self.session.headers.update(self.headers)
-        self.cookie_file = 'cookies.json'
+        # 使用脚本所在目录的绝对路径，避免工作目录问题
+        self.script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.cookie_file = os.path.join(self.script_dir, 'cookies.json')
         
         if self.load_cookies():
-            print("[+] 本地 Cookie 加载成功")
+            print(f"[+] 本地 Cookie 加载成功: {self.cookie_file}")
 
     def load_cookies(self):
         if os.path.exists(self.cookie_file):
@@ -119,17 +121,13 @@ class HealthClient:
                     browser.close()
                     return False
                 
-                print("[+] 扫码成功，正在初始化环境...")
+                print("[+] 扫码成功，正在获取Cookie...")
                 
-                # 3. 关键：访问各个子域以确保 Cookie 完整
-                page.goto("https://www.91160.com/")
-                # time.sleep(1)
-                page.goto("https://user.91160.com/user/index.html")
-                # time.sleep(1)
-                # 访问 gate 确保 API 权限 (虽然 gate 是 API 域，通常不做页面展示，但访问一下根绝无坏处)
-                # 实际上 gate 可能没有页面，但可以访问一个 404 页
+                # 3. 快速访问子域获取 Cookie（不等待完全加载）
+                page.goto("https://www.91160.com/", wait_until="domcontentloaded")
+                page.goto("https://user.91160.com/user/index.html", wait_until="domcontentloaded")
                 
-                # 4. 提取 Cookie
+                # 4. 立即提取 Cookie
                 cookies = context.cookies()
                 print(f"[*] 提取到 {len(cookies)} 个 Cookie")
                 

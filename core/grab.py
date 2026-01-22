@@ -7,7 +7,7 @@ import json
 import time
 import datetime
 import sys
-from client import HealthClient
+from .client import HealthClient
 
 def load_config(path="config.json"):
     """加载配置文件"""

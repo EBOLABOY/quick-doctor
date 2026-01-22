@@ -5,3 +5,4 @@ playwright
 ddddocr
 pycryptodome
 beautifulsoup4
+PyQt6

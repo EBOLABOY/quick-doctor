@@ -1,4 +1,4 @@
-from client import HealthClient
+from core.client import HealthClient
 import sys
 import json
 

@@ -402,6 +402,11 @@ class MainWindow(QMainWindow):
         self.signals = WorkerSignals()
         self.cities: List[Dict] = []
         self.is_running = False
+        self.is_logged_in = False
+        self.login_checked = False
+        self.pending_doctor_query = False
+        self.pending_hospital_load = False
+        self.pending_dep_load = False
         self.grab_stop_event = threading.Event()
         self.grab_thread: Optional[threading.Thread] = None
         self.qr_dialog: Optional[QRLoginDialog] = None
@@ -788,6 +793,15 @@ class MainWindow(QMainWindow):
         city_id = self.city_combo.currentData()
         if not city_id:
             return
+        if not self.login_checked:
+            if not self.pending_hospital_load:
+                self.log("登录状态验证中，稍后自动加载医院", "#FF9500")
+            self.pending_hospital_load = True
+            return
+        if not self.is_logged_in:
+            self.log("未登录，无法加载医院", "#FF3B30")
+            self.pending_hospital_load = True
+            return
         self.log(f"正在加载城市 {self.city_combo.currentText()} 的医院...")
         self.hospital_combo.clear()
         self.hospital_combo.addItem("加载中...", "")
@@ -813,6 +827,15 @@ class MainWindow(QMainWindow):
             return
         unit_id = self.hospital_combo.currentData()
         if not unit_id:
+            return
+        if not self.login_checked:
+            if not self.pending_dep_load:
+                self.log("登录状态验证中，稍后自动加载科室", "#FF9500")
+            self.pending_dep_load = True
+            return
+        if not self.is_logged_in:
+            self.log("未登录，无法加载科室", "#FF3B30")
+            self.pending_dep_load = True
             return
         
         self.log(f"正在加载科室...")
@@ -868,6 +891,14 @@ class MainWindow(QMainWindow):
         unit_id = self.hospital_combo.currentData()
         dep_id = self.dep_combo.currentData()
         if unit_id in (None, "") or dep_id in (None, ""):
+            return
+        if not self.login_checked:
+            if not self.pending_doctor_query:
+                self.log("登录状态验证中，稍后自动查询排班", "#FF9500")
+            self.pending_doctor_query = True
+            return
+        if not self.is_logged_in:
+            self.log("未登录，无法查询排班", "#FF3B30")
             return
 
         date_value = self.date_edit.date()
@@ -927,12 +958,24 @@ class MainWindow(QMainWindow):
         self._set_combo_items(self.member_combo, items, select_first=True)
     
     def _update_login_status(self, logged_in: bool):
+        self.is_logged_in = logged_in
+        self.login_checked = True
         if logged_in:
             self.status_dot.setStyleSheet("color: #34C759; font-size: 10px; background: transparent;")
             self.status_label.setText("已登录")
         else:
             self.status_dot.setStyleSheet("color: #FF3B30; font-size: 10px; background: transparent;")
             self.status_label.setText("未登录")
+        if logged_in and self.pending_hospital_load:
+            self.pending_hospital_load = False
+            self.pending_dep_load = False
+            self.on_city_changed(self.city_combo.currentIndex())
+        elif logged_in and self.pending_dep_load:
+            self.pending_dep_load = False
+            self.on_hospital_changed(self.hospital_combo.currentIndex())
+        if logged_in and self.pending_doctor_query:
+            self.pending_doctor_query = False
+            self._load_doctors()
     
     # ─────────────────────────────────────────────────────────────────
     # 登录相关

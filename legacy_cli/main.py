@@ -244,7 +244,11 @@ def main():
         return
 
     # 10. 提交订单
-    sch_date = selected_sch.get('to_date', selected_date)
+    ticket_detail_by_member = client.get_ticket_detail(unit_id, dep_id, sch_id, member_id=selected_member["id"])
+    if ticket_detail_by_member:
+        ticket_detail = ticket_detail_by_member
+
+    sch_date = ticket_detail.get("sch_date", "")
     sch_data = ticket_detail.get('sch_data', '')
     detlid_realtime = ticket_detail.get('detlid_realtime', '')
     level_code = ticket_detail.get('level_code', '')
@@ -262,8 +266,14 @@ def main():
         'doctor_id': selected_doc.get('doctor_id', ''),
         'his_doc_id': selected_doc.get('his_doc_id', ''),
         'detlid': selected_time['value'],
-        'detl_name': selected_time['name'],
         'member_id': selected_member['id'],
+        'addressId': ticket_detail.get("addressId", ""),
+        'address': ticket_detail.get("address", ""),
+        'hisMemId': ticket_detail.get("hisMemId", ""),
+        'order_no': ticket_detail.get("order_no", ""),
+        'disease_input': ticket_detail.get("disease_input", ""),
+        'disease_content': ticket_detail.get("disease_content", ""),
+        'is_hot': ticket_detail.get("is_hot", ""),
         # 隐藏参数
         'sch_data': sch_data,
         'detlid_realtime': detlid_realtime,

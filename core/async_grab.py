@@ -161,7 +161,7 @@ async def async_grab_once(config: Dict, client: AsyncHealthClient) -> bool:
             print(f"[+] 发现号源: {query_date} {doc.get('doctor_name')} - {sch.get('time_type_desc')} (余{left_num})")
             
             # 获取号源详情
-            ticket_detail = await client.get_ticket_detail(unit_id, dep_id, schedule_id)
+            ticket_detail = await client.get_ticket_detail(unit_id, dep_id, schedule_id, member_id=member_id)
             if not ticket_detail:
                 continue
             
@@ -189,6 +189,12 @@ async def async_grab_once(config: Dict, client: AsyncHealthClient) -> bool:
             
             print(f"[+] 选择时段: {selected_time['name']}")
             
+            address_id = (ticket_detail.get("addressId") or "").strip()
+            address_text = (ticket_detail.get("address") or "").strip()
+            if not address_id or address_id in ("0", "-1") or not address_text:
+                print("[-] 缺少城市地址信息：请先在网页端添加/选择城市地址（或在配置里提供 addressId/address）")
+                continue
+
             # 提交订单
             result = await client.submit_order({
                 'unit_id': unit_id,
@@ -199,13 +205,18 @@ async def async_grab_once(config: Dict, client: AsyncHealthClient) -> bool:
                 'his_doc_id': doc.get('his_doc_id', ''),
                 'his_dep_id': doc.get('his_dep_id', ''),
                 'detlid': selected_time['value'],
-                'detl_name': selected_time['name'],
                 'member_id': member_id,
+                'addressId': address_id,
+                'address': address_text,
+                'hisMemId': ticket_detail.get("hisMemId", ""),
+                'order_no': ticket_detail.get("order_no", ""),
+                'disease_input': ticket_detail.get("disease_input", ""),
+                'disease_content': ticket_detail.get("disease_content", ""),
+                'is_hot': ticket_detail.get("is_hot", ""),
+                'sch_date': ticket_detail.get("sch_date", ""),
                 'sch_data': sch_data,
                 'detlid_realtime': detlid_realtime,
                 'level_code': level_code,
-                'sch_date': sch.get('to_date', query_date),
-                'to_date': sch.get('to_date', query_date)
             })
             
             if result.get('success') or result.get('status'):
@@ -234,46 +245,48 @@ async def async_grab_loop(config: Dict):
     # 初始化客户端
     max_concurrency = config.get('max_concurrency', 10)
     client = AsyncHealthClient(max_concurrency=max_concurrency)
-    
-    if not await client.load_cookies():
-        print("[-] Cookie 加载失败，请先登录")
-        return
-    
-    if not client.access_hash:
-        print("[-] 没有 access_hash，请重新登录")
-        return
-    
-    print(f"[*] 配置加载成功:")
-    print(f"    医院: {config.get('unit_name', config['unit_id'])}")
-    print(f"    科室: {config.get('dep_name', config['dep_id'])}")
-    print(f"    日期: {', '.join(config['target_dates'])}")
-    print(f"    就诊人: {config.get('member_name', config['member_id'])}")
-    print(f"    并发数: {max_concurrency}")
-    
-    # 精准等待
-    start_time = config.get('start_time')
-    if start_time:
-        await wait_until_precise(start_time, client)
-    
-    # 抢号循环
-    retry_interval = config.get('retry_interval', 0.3)
-    max_retries = config.get('max_retries', 0)
-    
-    attempt = 0
-    while True:
-        attempt += 1
-        print(f"\n[*] 第 {attempt} 次尝试...")
+    try:
+        if not await client.load_cookies():
+            print("[-] Cookie 加载失败，请先登录")
+            return
         
-        if await async_grab_once(config, client):
-            print("\n[*] 抢号任务完成!")
-            break
+        if not client.access_hash:
+            print("[-] 没有 access_hash，请重新登录")
+            return
         
-        if max_retries > 0 and attempt >= max_retries:
-            print(f"\n[-] 已达最大重试次数 ({max_retries})，退出")
-            break
+        print(f"[*] 配置加载成功:")
+        print(f"    医院: {config.get('unit_name', config['unit_id'])}")
+        print(f"    科室: {config.get('dep_name', config['dep_id'])}")
+        print(f"    日期: {', '.join(config['target_dates'])}")
+        print(f"    就诊人: {config.get('member_name', config['member_id'])}")
+        print(f"    并发数: {max_concurrency}")
         
-        # 使用异步 sleep
-        await asyncio.sleep(retry_interval)
+        # 精准等待
+        start_time = config.get('start_time')
+        if start_time:
+            await wait_until_precise(start_time, client)
+        
+        # 抢号循环
+        retry_interval = config.get('retry_interval', 0.3)
+        max_retries = config.get('max_retries', 0)
+        
+        attempt = 0
+        while True:
+            attempt += 1
+            print(f"\n[*] 第 {attempt} 次尝试...")
+            
+            if await async_grab_once(config, client):
+                print("\n[*] 抢号任务完成!")
+                break
+            
+            if max_retries > 0 and attempt >= max_retries:
+                print(f"\n[-] 已达最大重试次数 ({max_retries})，退出")
+                break
+            
+            # 使用异步 sleep
+            await asyncio.sleep(retry_interval)
+    finally:
+        await client.close()
 
 
 async def main():
@@ -316,86 +329,88 @@ async def snipe_mode(config: Dict):
     # 初始化客户端
     max_concurrency = config.get('max_concurrency', 5)
     client = AsyncHealthClient(max_concurrency=max_concurrency)
-    
-    if not await client.load_cookies():
-        print("[-] Cookie 加载失败，请先登录")
-        return
-    
-    unit_id = config['unit_id']
-    dep_id = config['dep_id']
-    target_dates = config.get('target_dates', [])
-    
-    print(f"[*] 监控配置:")
-    print(f"    医院: {config.get('unit_name', unit_id)}")
-    print(f"    科室: {config.get('dep_name', dep_id)}")
-    print(f"    日期: {', '.join(target_dates)}")
-    print(f"    监控间隔: {snipe_interval}秒")
-    print()
-    
-    check_count = 0
-    
-    while True:
-        check_count += 1
-        now = datetime.now().strftime("%H:%M:%S")
-        print(f"[{now}] 第 {check_count} 次监控...")
+    try:
+        if not await client.load_cookies():
+            print("[-] Cookie 加载失败，请先登录")
+            return
         
-        try:
-            # 低频查询
-            all_docs = await client.get_schedule_batch(unit_id, dep_id, target_dates)
+        unit_id = config['unit_id']
+        dep_id = config['dep_id']
+        target_dates = config.get('target_dates', [])
+        
+        print(f"[*] 监控配置:")
+        print(f"    医院: {config.get('unit_name', unit_id)}")
+        print(f"    科室: {config.get('dep_name', dep_id)}")
+        print(f"    日期: {', '.join(target_dates)}")
+        print(f"    监控间隔: {snipe_interval}秒")
+        print()
+        
+        check_count = 0
+        
+        while True:
+            check_count += 1
+            now = datetime.now().strftime("%H:%M:%S")
+            print(f"[{now}] 第 {check_count} 次监控...")
             
-            # 检查是否有余号
-            found_slots = []
-            for doc in all_docs:
-                left_num = doc.get('total_left_num', 0)
-                if isinstance(left_num, str):
-                    left_num = int(left_num) if left_num.isdigit() else 0
+            try:
+                # 低频查询
+                all_docs = await client.get_schedule_batch(unit_id, dep_id, target_dates)
                 
-                if left_num > 0:
-                    found_slots.append({
-                        'doctor_name': doc.get('doctor_name'),
-                        'left_num': left_num,
-                        'doc': doc
-                    })
-            
-            if found_slots:
-                print(f"\n[!!!] 发现退号! 共 {len(found_slots)} 位医生有号")
-                for slot in found_slots:
-                    print(f"    - {slot['doctor_name']} (余 {slot['left_num']})")
-                
-                # 切换高频模式
-                print(f"\n[*] 切换高频抢夺模式 (持续 {rush_duration}秒)...")
-                rush_start = time.time()
-                
-                while time.time() - rush_start < rush_duration:
-                    if await async_grab_once(config, client):
-                        print("\n[*] 捡漏成功! 任务完成!")
-                        
-                        # 通知
-                        try:
-                            from .notifier import notify_success
-                            notify_success(
-                                member_name=config.get('member_name', ''),
-                                unit_name=config.get('unit_name', ''),
-                                dep_name=config.get('dep_name', ''),
-                                doctor_name=found_slots[0]['doctor_name'],
-                                date=target_dates[0] if target_dates else '',
-                                time_slot=''
-                            )
-                        except:
-                            pass
-                        
-                        return
+                # 检查是否有余号
+                found_slots = []
+                for doc in all_docs:
+                    left_num = doc.get('total_left_num', 0)
+                    if isinstance(left_num, str):
+                        left_num = int(left_num) if left_num.isdigit() else 0
                     
-                    await asyncio.sleep(rush_interval)
+                    if left_num > 0:
+                        found_slots.append({
+                            'doctor_name': doc.get('doctor_name'),
+                            'left_num': left_num,
+                            'doc': doc
+                        })
                 
-                print("[*] 高频抢夺结束，恢复监控模式...")
-            else:
-                print(f"    无余号，{snipe_interval}秒后重试...")
+                if found_slots:
+                    print(f"\n[!!!] 发现退号! 共 {len(found_slots)} 位医生有号")
+                    for slot in found_slots:
+                        print(f"    - {slot['doctor_name']} (余 {slot['left_num']})")
+                    
+                    # 切换高频模式
+                    print(f"\n[*] 切换高频抢夺模式 (持续 {rush_duration}秒)...")
+                    rush_start = time.time()
+                    
+                    while time.time() - rush_start < rush_duration:
+                        if await async_grab_once(config, client):
+                            print("\n[*] 捡漏成功! 任务完成!")
+                            
+                            # 通知
+                            try:
+                                from .notifier import notify_success
+                                notify_success(
+                                    member_name=config.get('member_name', ''),
+                                    unit_name=config.get('unit_name', ''),
+                                    dep_name=config.get('dep_name', ''),
+                                    doctor_name=found_slots[0]['doctor_name'],
+                                    date=target_dates[0] if target_dates else '',
+                                    time_slot=''
+                                )
+                            except:
+                                pass
+                            
+                            return
+                        
+                        await asyncio.sleep(rush_interval)
+                    
+                    print("[*] 高频抢夺结束，恢复监控模式...")
+                else:
+                    print(f"    无余号，{snipe_interval}秒后重试...")
+                
+            except Exception as e:
+                print(f"[-] 监控异常: {e}")
             
-        except Exception as e:
-            print(f"[-] 监控异常: {e}")
-        
-        await asyncio.sleep(snipe_interval)
+            await asyncio.sleep(snipe_interval)
+    finally:
+        await client.close()
 
 
 async def main_snipe():

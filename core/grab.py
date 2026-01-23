@@ -179,7 +179,7 @@ def grab(config, client, on_log: Optional[Callable] = None, stop_event: Optional
                 )
                 
                 # 获取号源详情
-                ticket_detail = client.get_ticket_detail(unit_id, dep_id, schedule_id)
+                ticket_detail = client.get_ticket_detail(unit_id, dep_id, schedule_id, member_id=member_id)
                 if not ticket_detail:
                     # print(f"[-] 获取号源详情失败")
                     continue
@@ -210,34 +210,52 @@ def grab(config, client, on_log: Optional[Callable] = None, stop_event: Optional
                 if stop_event and stop_event.is_set():
                     return False
 
+                def _normalize_address_id(value: str) -> str:
+                    value = (value or "").strip()
+                    if not value or value in ("0", "-1"):
+                        return ""
+                    return value
+
+                def _normalize_address_text(text: str) -> str:
+                    text = (text or "").strip()
+                    if not text:
+                        return ""
+                    placeholders = ("请选择", "请填写", "请输入", "城市地址")
+                    if any(p in text for p in placeholders):
+                        return ""
+                    return text
+
                 address_id = (
-                    config.get("addressId")
-                    or config.get("address_id")
-                    or ticket_detail.get("addressId")
-                    or ticket_detail.get("address_id")
+                    _normalize_address_id(config.get("addressId"))
+                    or _normalize_address_id(config.get("address_id"))
+                    or _normalize_address_id(ticket_detail.get("addressId"))
+                    or _normalize_address_id(ticket_detail.get("address_id"))
                 )
                 address_text = (
-                    config.get("address")
-                    or ticket_detail.get("address")
+                    _normalize_address_text(config.get("address"))
+                    or _normalize_address_text(ticket_detail.get("address"))
                 )
                 if not address_id or not address_text:
                     addresses = ticket_detail.get("addresses") or []
-                    if addresses:
-                        address_id = address_id or addresses[0].get("id", "")
-                        address_text = address_text or addresses[0].get("text", "")
-                        if address_id and address_text:
-                            _emit_log(
-                                on_log,
-                                f"未配置地址，使用页面地址: {address_text}",
-                                "warn",
-                            )
-                    if not address_id or not address_text:
-                        address_id = address_id or "3317"
-                        address_text = address_text or "Civic Center"
-                        _emit_log(on_log, "未配置地址，使用默认地址参数", "warn")
+                    for item in addresses:
+                        cand_id = _normalize_address_id(item.get("id"))
+                        cand_text = _normalize_address_text(item.get("text"))
+                        if not cand_id or not cand_text:
+                            continue
+                        address_id = cand_id
+                        address_text = cand_text
+                        _emit_log(on_log, f"未配置地址，使用页面地址: {address_text}", "warn")
+                        break
+
+                if not address_id or not address_text:
+                    _emit_log(
+                        on_log,
+                        "缺少城市地址信息：请先在网页端添加/选择城市地址（或在配置里提供 addressId/address）",
+                        "error",
+                    )
+                    continue
                 
                 # 提交订单
-                sch_date = sch.get('to_date', target_date)
                 result = client.submit_order(
                     unit_id=unit_id,
                     dep_id=dep_id,
@@ -252,10 +270,13 @@ def grab(config, client, on_log: Optional[Callable] = None, stop_event: Optional
                     address=address_text,
                     sch_data=sch_data,
                     level_code=level_code,
-                    sch_date=sch_date,
-                    to_date=sch_date,
                     detlid_realtime=detlid_realtime,
-                    detl_name=selected_time['name']
+                    sch_date=ticket_detail.get("sch_date", ""),
+                    hisMemId=ticket_detail.get("hisMemId", ""),
+                    order_no=ticket_detail.get("order_no", ""),
+                    disease_input=ticket_detail.get("disease_input", ""),
+                    disease_content=ticket_detail.get("disease_content", ""),
+                    is_hot=ticket_detail.get("is_hot", ""),
                 )
                 
                 if result and (result.get('success') or result.get('status')):
